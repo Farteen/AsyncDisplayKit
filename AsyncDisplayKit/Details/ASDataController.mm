@@ -15,6 +15,7 @@
 #import "ASDisplayNode.h"
 #import "ASMultidimensionalArrayUtils.h"
 #import "ASDisplayNodeInternal.h"
+#import "ASLayout.h"
 
 //#define LOG(...) NSLog(__VA_ARGS__)
 #define LOG(...)
@@ -151,8 +152,6 @@ static void *kASSizingQueueContext = &kASSizingQueueContext;
 
 - (void)_layoutNodes:(NSArray *)nodes ofKind:(NSString *)kind atIndexPaths:(NSArray *)indexPaths completion:(void (^)(NSArray *nodes, NSArray *indexPaths))completionBlock
 {
-  ASDisplayNodeAssert([NSOperationQueue currentQueue] == _editingTransactionQueue, @"Cell node layout must be initiated from edit transaction queue");
-  
   if (!nodes.count) {
     return;
   }
@@ -185,8 +184,9 @@ static void *kASSizingQueueContext = &kASSizingQueueContext;
   dispatch_group_wait(layoutGroup, DISPATCH_TIME_FOREVER);
   free(nodeBoundSizes);
 
-  if (completionBlock)
+  if (completionBlock) {
     completionBlock(nodes, indexPaths);
+  }
 }
 
 - (ASSizeRange)constrainedSizeForNodeOfKind:(NSString *)kind atIndexPath:(NSIndexPath *)indexPath
@@ -218,8 +218,10 @@ static void *kASSizingQueueContext = &kASSizingQueueContext;
 
 - (void)deleteNodesOfKind:(NSString *)kind atIndexPaths:(NSArray *)indexPaths completion:(void (^)(NSArray *nodes, NSArray *indexPaths))completionBlock
 {
-  if (indexPaths.count == 0)
+  if (indexPaths.count == 0) {
     return;
+  }
+
   LOG(@"_deleteNodesAtIndexPaths:%@ ofKind:%@, full index paths in _editingNodes = %@", indexPaths, kind, ASIndexPathsForMultidimensionalArray(_editingNodes[kind]));
   NSMutableArray *editingNodes = _editingNodes[kind];
   ASDeleteElementsInMultidimensionalArrayAtIndexPaths(editingNodes, indexPaths);
@@ -357,11 +359,21 @@ static void *kASSizingQueueContext = &kASSizingQueueContext;
 
 - (void)reloadDataWithAnimationOptions:(ASDataControllerAnimationOptions)animationOptions completion:(void (^)())completion
 {
+  [self _reloadDataWithAnimationOptions:animationOptions synchronously:NO completion:completion];
+}
+
+- (void)reloadDataImmediatelyWithAnimationOptions:(ASDataControllerAnimationOptions)animationOptions
+{
+  [self _reloadDataWithAnimationOptions:animationOptions synchronously:YES completion:nil];
+}
+
+- (void)_reloadDataWithAnimationOptions:(ASDataControllerAnimationOptions)animationOptions synchronously:(BOOL)synchronously completion:(void (^)())completion
+{
   [self performEditCommandWithBlock:^{
     ASDisplayNodeAssertMainThread();
     [_editingTransactionQueue waitUntilAllOperationsAreFinished];
 
-    [self accessDataSourceWithBlock:^{
+    [self accessDataSourceSynchronously:synchronously withBlock:^{
       NSUInteger sectionCount = [_dataSource numberOfSectionsInDataController:self];
       NSMutableArray *updatedNodes = [NSMutableArray array];
       NSMutableArray *updatedIndexPaths = [NSMutableArray array];
@@ -373,7 +385,7 @@ static void *kASSizingQueueContext = &kASSizingQueueContext;
       // Allow subclasses to perform setup before going into the edit transaction
       [self prepareForReloadData];
       
-      [_editingTransactionQueue addOperationWithBlock:^{
+      void (^transactionBlock)() = ^{
         LOG(@"Edit Transaction - reloadData");
         
         // Remove everything that existed before the reload, now that we're ready to insert replacements
@@ -399,7 +411,13 @@ static void *kASSizingQueueContext = &kASSizingQueueContext;
         if (completion) {
           dispatch_async(dispatch_get_main_queue(), completion);
         }
-      }];
+      };
+      
+      if (synchronously) {
+        transactionBlock();
+      } else {
+        [_editingTransactionQueue addOperationWithBlock:transactionBlock];
+      }
     }];
   }];
 }
@@ -413,7 +431,12 @@ static void *kASSizingQueueContext = &kASSizingQueueContext;
  */
 - (void)accessDataSourceWithBlock:(dispatch_block_t)block
 {
-  if (_asyncDataFetchingEnabled) {
+  [self accessDataSourceSynchronously:NO withBlock:block];
+}
+
+- (void)accessDataSourceSynchronously:(BOOL)synchronously withBlock:(dispatch_block_t)block
+{
+  if (!synchronously && _asyncDataFetchingEnabled) {
     [_dataSource dataControllerLockDataSource];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
       block();
@@ -818,8 +841,8 @@ static void *kASSizingQueueContext = &kASSizingQueueContext;
       [section enumerateObjectsUsingBlock:^(ASCellNode *node, NSUInteger rowIndex, BOOL *stop) {
         NSIndexPath *indexPath = [NSIndexPath indexPathForRow:rowIndex inSection:sectionIndex];
         ASSizeRange constrainedSize = [self constrainedSizeForNodeOfKind:kind atIndexPath:indexPath];
-        [node measureWithSizeRange:constrainedSize];
-        node.frame = CGRectMake(0.0f, 0.0f, node.calculatedSize.width, node.calculatedSize.height);
+        ASLayout *layout = [node measureWithSizeRange:constrainedSize];
+        node.frame = CGRectMake(0.0f, 0.0f, layout.size.width, layout.size.height);
       }];
     }];
   }];
@@ -849,7 +872,7 @@ static void *kASSizingQueueContext = &kASSizingQueueContext;
 
 - (NSArray *)indexPathsForEditingNodesOfKind:(NSString *)kind
 {
-  return _editingNodes[kind] != nil ? ASIndexPathsForMultidimensionalArray(_editingNodes[kind]) : [NSArray array];
+  return _editingNodes[kind] != nil ? ASIndexPathsForMultidimensionalArray(_editingNodes[kind]) : nil;
 }
 
 - (NSMutableArray *)editingNodesOfKind:(NSString *)kind

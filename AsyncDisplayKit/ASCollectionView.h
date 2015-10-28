@@ -90,7 +90,7 @@
  * collection view layout subclasses will need to provide their own implementation of an inspector object for their
  * supplementary views to be compatible with `ASCollectionView`'s supplementary node support.
  */
-@property (nonatomic, weak) id<ASCollectionViewLayoutInspecting> layoutDelegate;
+@property (nonatomic, weak) id<ASCollectionViewLayoutInspecting> layoutInspector;
 
 /**
  *  Perform a batch of updates asynchronously, optionally disabling all animations in the batch. This method must be called from the main thread. 
@@ -130,6 +130,14 @@
  * @warning This method is substantially more expensive than UICollectionView's version.
  */
 - (void)reloadData;
+
+/**
+ * Reload everything from scratch entirely on the main thread, destroying the working range and all cached nodes.
+ *
+ * @warning This method is substantially more expensive than UICollectionView's version and will block the main thread
+ * while all the cells load.
+ */
+- (void)reloadDataImmediately;
 
 /**
  * Registers the given kind of supplementary node for use in creating node-backed supplementary views.
@@ -214,6 +222,16 @@
  * before this method is called.
  */
 - (void)reloadItemsAtIndexPaths:(NSArray *)indexPaths;
+
+/**
+ * Relayouts the specified item.
+ *
+ * @param indexPath The index path identifying the item to relayout.
+ *
+ * @discussion This method must be called from the main thread. The relayout is excuted on main thread.
+ * The node of the specified item must be updated to cause layout changes before this method is called.
+ */
+- (void)relayoutItemAtIndexPath:(NSIndexPath *)indexPath;
 
 /**
  * Moves the item at a specified location to a destination location.

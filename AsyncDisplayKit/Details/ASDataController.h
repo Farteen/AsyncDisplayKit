@@ -97,7 +97,7 @@ typedef NSUInteger ASDataControllerAnimationOptions;
  *
  * All operations are asynchronous and thread safe. You can call it from background thread (it is recommendated) and the data
  * will be updated asynchronously. The dataSource must be updated to reflect the changes before these methods has been called.
- * For each data updatin, the corresponding methods in delegate will be called.
+ * For each data updating, the corresponding methods in delegate will be called.
  */
 @protocol ASFlowLayoutControllerDataSource;
 @interface ASDataController : ASDealloc2MainObject <ASFlowLayoutControllerDataSource>
@@ -167,6 +167,8 @@ typedef NSUInteger ASDataControllerAnimationOptions;
 - (void)moveRowAtIndexPath:(NSIndexPath *)indexPath toIndexPath:(NSIndexPath *)newIndexPath withAnimationOptions:(ASDataControllerAnimationOptions)animationOptions;
 
 - (void)reloadDataWithAnimationOptions:(ASDataControllerAnimationOptions)animationOptions completion:(void (^)())completion;
+
+- (void)reloadDataImmediatelyWithAnimationOptions:(ASDataControllerAnimationOptions)animationOptions;
 
 /** @name Data Querying */
 

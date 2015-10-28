@@ -7,9 +7,10 @@
  */
 
 #import "ASTableView.h"
+#import "ASTableViewInternal.h"
 
 #import "ASAssert.h"
-#import "ASDataController.h"
+#import "ASChangeSetDataController.h"
 #import "ASCollectionViewLayoutController.h"
 #import "ASLayoutController.h"
 #import "ASRangeController.h"
@@ -155,7 +156,6 @@ static BOOL _isInterceptedSelector(SEL sel)
   _ASTableViewProxy *_proxyDataSource;
   _ASTableViewProxy *_proxyDelegate;
 
-  ASDataController *_dataController;
   ASFlowLayoutController *_layoutController;
 
   ASRangeController *_rangeController;
@@ -169,11 +169,12 @@ static BOOL _isInterceptedSelector(SEL sel)
   NSIndexPath *_contentOffsetAdjustmentTopVisibleRow;
   CGFloat _contentOffsetAdjustment;
 
-  CGFloat _maxWidthForNodesConstrainedSize;
-  BOOL _ignoreMaxWidthChange;
+  CGFloat _nodesConstrainedWidth;
+  BOOL _ignoreNodesConstrainedWidthChange;
 }
 
 @property (atomic, assign) BOOL asyncDataSourceLocked;
+@property (nonatomic, retain, readwrite) ASDataController *dataController;
 
 @end
 
@@ -199,24 +200,29 @@ void ASPerformBlockWithoutAnimation(BOOL withoutAnimation, void (^block)()) {
   }
 }
 
++ (Class)dataControllerClass
+{
+  return [ASChangeSetDataController class];
+}
+
 #pragma mark -
 #pragma mark Lifecycle
 
-- (void)configureWithAsyncDataFetching:(BOOL)asyncDataFetchingEnabled
+- (void)configureWithDataControllerClass:(Class)dataControllerClass asyncDataFetching:(BOOL)asyncDataFetching
 {
   _layoutController = [[ASFlowLayoutController alloc] initWithScrollOption:ASFlowLayoutDirectionVertical];
   
   _rangeController = [[ASRangeController alloc] init];
   _rangeController.layoutController = _layoutController;
   _rangeController.delegate = self;
-
-  _dataController = [[ASDataController alloc] initWithAsyncDataFetching:asyncDataFetchingEnabled];
+  
+  _dataController = [[dataControllerClass alloc] initWithAsyncDataFetching:asyncDataFetching];
   _dataController.dataSource = self;
   _dataController.delegate = _rangeController;
   
   _layoutController.dataSource = _dataController;
 
-  _asyncDataFetchingEnabled = asyncDataFetchingEnabled;
+  _asyncDataFetchingEnabled = asyncDataFetching;
   _asyncDataSourceLocked = NO;
 
   _leadingScreensForBatching = 1.0;
@@ -224,10 +230,10 @@ void ASPerformBlockWithoutAnimation(BOOL withoutAnimation, void (^block)()) {
 
   _automaticallyAdjustsContentOffset = NO;
   
-  _maxWidthForNodesConstrainedSize = self.bounds.size.width;
+  _nodesConstrainedWidth = self.bounds.size.width;
   // If the initial size is 0, expect a size change very soon which is part of the initial configuration
   // and should not trigger a relayout.
-  _ignoreMaxWidthChange = (_maxWidthForNodesConstrainedSize == 0);
+  _ignoreNodesConstrainedWidthChange = (_nodesConstrainedWidth == 0);
 }
 
 - (instancetype)initWithFrame:(CGRect)frame style:(UITableViewStyle)style
@@ -237,6 +243,11 @@ void ASPerformBlockWithoutAnimation(BOOL withoutAnimation, void (^block)()) {
 
 - (instancetype)initWithFrame:(CGRect)frame style:(UITableViewStyle)style asyncDataFetching:(BOOL)asyncDataFetchingEnabled
 {
+  return [self initWithFrame:frame style:style dataControllerClass:[self.class dataControllerClass] asyncDataFetching:asyncDataFetchingEnabled];
+}
+
+- (instancetype)initWithFrame:(CGRect)frame style:(UITableViewStyle)style dataControllerClass:(Class)dataControllerClass asyncDataFetching:(BOOL)asyncDataFetchingEnabled
+{
   if (!(self = [super initWithFrame:frame style:style]))
     return nil;
 
@@ -244,8 +255,8 @@ void ASPerformBlockWithoutAnimation(BOOL withoutAnimation, void (^block)()) {
   // https://github.com/facebook/AsyncDisplayKit/issues/385
   asyncDataFetchingEnabled = NO;
   
-  [self configureWithAsyncDataFetching:asyncDataFetchingEnabled];
-
+  [self configureWithDataControllerClass:dataControllerClass asyncDataFetching:asyncDataFetchingEnabled];
+  
   return self;
 }
 
@@ -254,7 +265,7 @@ void ASPerformBlockWithoutAnimation(BOOL withoutAnimation, void (^block)()) {
   if (!(self = [super initWithCoder:aDecoder]))
     return nil;
 
-  [self configureWithAsyncDataFetching:NO];
+  [self configureWithDataControllerClass:[self.class dataControllerClass] asyncDataFetching:NO];
 
   return self;
 }
@@ -334,6 +345,13 @@ void ASPerformBlockWithoutAnimation(BOOL withoutAnimation, void (^block)()) {
   [self reloadDataWithCompletion:nil];
 }
 
+- (void)reloadDataImmediately
+{
+  ASDisplayNodeAssertMainThread();
+  [_dataController reloadDataImmediatelyWithAnimationOptions:UITableViewRowAnimationNone];
+  [super reloadData];
+}
+
 - (void)setTuningParameters:(ASRangeTuningParameters)tuningParameters forRangeType:(ASLayoutRangeType)rangeType
 {
   [_layoutController setTuningParameters:tuningParameters forRangeType:rangeType];
@@ -396,13 +414,13 @@ void ASPerformBlockWithoutAnimation(BOOL withoutAnimation, void (^block)()) {
 
 - (void)layoutSubviews
 {
-  if (_maxWidthForNodesConstrainedSize != self.bounds.size.width) {
-    _maxWidthForNodesConstrainedSize = self.bounds.size.width;
+  if (_nodesConstrainedWidth != self.bounds.size.width) {
+    _nodesConstrainedWidth = self.bounds.size.width;
 
     // First width change occurs during initial configuration. An expensive relayout pass is unnecessary at that time
     // and should be avoided, assuming that the initial data loading automatically runs shortly afterward.
-    if (_ignoreMaxWidthChange) {
-      _ignoreMaxWidthChange = NO;
+    if (_ignoreNodesConstrainedWidthChange) {
+      _ignoreNodesConstrainedWidthChange = NO;
     } else {
       [self beginUpdates];
       [_dataController relayoutAllNodes];
@@ -410,7 +428,7 @@ void ASPerformBlockWithoutAnimation(BOOL withoutAnimation, void (^block)()) {
     }
   }
   
-  // To ensure _maxWidthForNodesConstrainedSize is up-to-date for every usage, this call to super must be done last
+  // To ensure _nodesConstrainedWidth is up-to-date for every usage, this call to super must be done last
   [super layoutSubviews];
 }
 
@@ -457,6 +475,14 @@ void ASPerformBlockWithoutAnimation(BOOL withoutAnimation, void (^block)()) {
 {
   ASDisplayNodeAssertMainThread();
   [_dataController reloadRowsAtIndexPaths:indexPaths withAnimationOptions:animation];
+}
+
+- (void)relayoutRowAtIndexPath:(NSIndexPath *)indexPath withRowAnimation:(UITableViewRowAnimation)animation
+{
+  ASDisplayNodeAssertMainThread();
+  ASCellNode *node = [self nodeForRowAtIndexPath:indexPath];
+  [node setNeedsLayout];
+  [super reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:animation];
 }
 
 - (void)moveRowAtIndexPath:(NSIndexPath *)indexPath toIndexPath:(NSIndexPath *)newIndexPath
@@ -828,8 +854,8 @@ void ASPerformBlockWithoutAnimation(BOOL withoutAnimation, void (^block)()) {
 
 - (ASSizeRange)dataController:(ASDataController *)dataController constrainedSizeForNodeAtIndexPath:(NSIndexPath *)indexPath
 {
-  return ASSizeRangeMake(CGSizeMake(_maxWidthForNodesConstrainedSize, 0),
-                         CGSizeMake(_maxWidthForNodesConstrainedSize, FLT_MAX));
+  return ASSizeRangeMake(CGSizeMake(_nodesConstrainedWidth, 0),
+                         CGSizeMake(_nodesConstrainedWidth, FLT_MAX));
 }
 
 - (void)dataControllerLockDataSource

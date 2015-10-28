@@ -12,7 +12,7 @@
 #import <AsyncDisplayKit/ASBaseDefines.h>
 #import <AsyncDisplayKit/ASDealloc2MainObject.h>
 #import <AsyncDisplayKit/ASDimension.h>
-
+#import <AsyncDisplayKit/ASAsciiArtBoxCreator.h>
 #import <AsyncDisplayKit/ASLayoutable.h>
 
 @class ASDisplayNode;
@@ -108,6 +108,10 @@ typedef void (^ASDisplayNodeDidLoadBlock)(ASDisplayNode *node);
 
 /** @name Properties */
 
+/**
+ * @abstract The name of this node, which will be displayed in `description`. The default value is nil.
+ */
+@property (atomic, copy) NSString *name;
 
 /** 
  * @abstract Returns whether the node is synchronous.
@@ -519,7 +523,7 @@ typedef void (^ASDisplayNodeDidLoadBlock)(ASDisplayNode *node);
  * Convenience methods for debugging.
  */
 
-@interface ASDisplayNode (Debugging)
+@interface ASDisplayNode (Debugging) <ASLayoutableAsciiArtProtocol>
 
 /**
  * @abstract Return a description of the node hierarchy.
@@ -539,7 +543,7 @@ typedef void (^ASDisplayNodeDidLoadBlock)(ASDisplayNode *node);
  * Using them will not cause the actual view/layer to be created, and will be applied when it is created (when the view 
  * or layer property is accessed).
  *
- * After the view is created, the properties pass through to the view directly as if called on the main thread.
+ * - NOTE: After the view or layer is created, the properties pass through to the view or layer directly and must be called on the main thread.
  *
  * See UIView and CALayer for documentation on these common properties.
  */
@@ -556,9 +560,13 @@ typedef void (^ASDisplayNodeDidLoadBlock)(ASDisplayNode *node);
  * If this node was measured, calling this method triggers an internal relayout: the calculated layout is invalidated,
  * and the supernode is notified or (if this node is the root one) a full measurement pass is executed using the old constrained size.
  * 
- * Note: If the relayout causes a change in size of the root node that is attached to a container view
- * (table or collection view, for example), the container view must be notified to relayout.
- * For ASTableView and ASCollectionView, an empty batch editing transaction must be triggered to animate to new row / item sizes.
+ * Note: If the relayout causes a change in size of the root node that is attached to a container view, 
+ * the container view must be notified to relayout. 
+ * For ASTableView and ASCollectionView, instead of calling this method directly, 
+ * it is recommended to call -relayoutRowAtIndexPath:withRowAnimation and -relayoutItemAtIndexPath: respectively.
+ *
+ * @see [ASTableView relayoutRowAtIndexPath:withRowAnimation:]
+ * @see [ASCollectionView relayoutItemAtIndexPath:]
  */
 - (void)setNeedsLayout;
 
@@ -583,7 +591,6 @@ typedef void (^ASDisplayNodeDidLoadBlock)(ASDisplayNode *node);
 @property (atomic, assign)           CGFloat contentsScale;                 // default=1.0f. See @contentsScaleForDisplay for more info
 @property (atomic, assign)           CATransform3D transform;               // default=CATransform3DIdentity
 @property (atomic, assign)           CATransform3D subnodeTransform;        // default=CATransform3DIdentity
-@property (atomic, copy)             NSString *name;                        // default=nil. Use this to tag your layers in the server-recurse-description / pca or for your own purposes
 
 /**
  * @abstract The node view's background color.
@@ -647,6 +654,7 @@ typedef void (^ASDisplayNodeDidLoadBlock)(ASDisplayNode *node);
  * @param node The node to be added.
  */
 - (void)addSubnode:(ASDisplayNode *)node;
+- (NSString *)name;
 @end
 
 /** CALayer(AsyncDisplayKit) defines convenience method for adding sub-ASDisplayNode to a CALayer. */
@@ -657,6 +665,7 @@ typedef void (^ASDisplayNodeDidLoadBlock)(ASDisplayNode *node);
  * @param node The node to be added.
  */
 - (void)addSubnode:(ASDisplayNode *)node;
+- (NSString *)name;
 @end
 
 @interface ASDisplayNode (Deprecated)
