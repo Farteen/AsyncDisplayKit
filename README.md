@@ -1,3 +1,6 @@
+
+force push
+
 ![AsyncDisplayKit](https://github.com/facebook/AsyncDisplayKit/blob/master/docs/assets/logo.png)
 
 [![Build Status](https://travis-ci.org/facebook/AsyncDisplayKit.svg)](https://travis-ci.org/facebook/AsyncDisplayKit)
